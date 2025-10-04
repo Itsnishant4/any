@@ -1,0 +1,16 @@
+{
+  "name": "backend-server",
+  "version": "1.0.0",
+  "description": "WebSocket signaling server for Vibe Remote Desktop",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}

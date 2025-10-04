@@ -1,0 +1,44 @@
+{
+  "name": "vibe",
+  "version": "1.0.0",
+  "main": "main/main.js",
+  "description": "Electron Remote Desktop App Boilerplate",
+  "author": "",
+  "license": "ISC",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
+    "dev:renderer": "cd renderer && npm run dev",
+    "dev:electron": "NODE_ENV=development electron .",
+    "build": "npm run build:renderer && electron-builder",
+    "build:renderer": "cd renderer && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.6.0",
+    "wait-on": "^9.0.1"
+  },
+  "build": {
+    "appId": "com.vibe.remote.desktop",
+    "productName": "VibeRemoteDesktop",
+    "files": [
+      "main/**/*",
+      "preload/**/*",
+      "renderer/dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

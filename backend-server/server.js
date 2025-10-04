@@ -1,0 +1,135 @@
+const WebSocket = require('ws');
+
+const wss = new WebSocket.Server({ port: 8080 });
+
+const sessions = new Map(); // Map to store active sessions: sessionId -> { hostWs, pendingClients: Map<clientId, clientWs>, approvedClients: Map<clientId, clientWs> }
+
+wss.on('connection', ws => {
+  console.log('WebSocket client connected');
+
+  ws.on('message', message => {
+    const data = JSON.parse(message);
+
+    switch (data.type) {
+      case 'create-session':
+        {
+          const sessionId = Math.random().toString(36).substring(2, 6).toUpperCase(); // 4-digit code
+          sessions.set(sessionId, { hostWs: ws, pendingClients: new Map(), approvedClients: new Map() });
+          ws.send(JSON.stringify({ type: 'session-created', sessionId }));
+          console.log(`Session ${sessionId} created by host`);
+        }
+        break;
+      case 'join-session':
+        {
+          const { sessionId } = data;
+          const session = sessions.get(sessionId);
+          if (session) {
+            const clientId = Math.random().toString(36).substring(2, 9);
+            session.pendingClients.set(clientId, ws);
+            ws.clientId = clientId; // Store clientId on the WebSocket object for easy lookup
+            session.hostWs.send(JSON.stringify({ type: 'client-request-join', clientId, sessionId }));
+            console.log(`Client ${clientId} requested to join session ${sessionId}`);
+          } else {
+            ws.send(JSON.stringify({ type: 'session-not-found' }));
+          }
+        }
+        break;
+      case 'approve-client':
+        {
+          const { sessionId, clientId } = data;
+          const session = sessions.get(sessionId);
+          if (session && session.hostWs === ws && session.pendingClients.has(clientId)) {
+            const clientWs = session.pendingClients.get(clientId);
+            session.pendingClients.delete(clientId);
+            session.approvedClients.set(clientId, clientWs);
+            clientWs.send(JSON.stringify({ type: 'session-joined', sessionId, clientId }));
+            session.hostWs.send(JSON.stringify({ type: 'peer-approved', clientId }));
+            console.log(`Host approved client ${clientId} for session ${sessionId}`);
+          }
+        }
+        break;
+      case 'reject-client':
+        {
+          const { sessionId, clientId } = data;
+          const session = sessions.get(sessionId);
+          if (session && session.hostWs === ws && session.pendingClients.has(clientId)) {
+            const clientWs = session.pendingClients.get(clientId);
+            session.pendingClients.delete(clientId);
+            clientWs.send(JSON.stringify({ type: 'session-rejected', sessionId }));
+            console.log(`Host rejected client ${clientId} for session ${sessionId}`);
+          }
+        }
+        break;
+      case 'screen-frame':
+        {
+          const { sessionId, data: frameData, timestamp, quality } = data;
+          const session = sessions.get(sessionId);
+          if (session && session.hostWs === ws) {
+            // Host sending screen frame to all approved clients
+            session.approvedClients.forEach((clientWs, clientId) => {
+              clientWs.send(JSON.stringify({
+                type: 'screen-frame',
+                data: frameData,
+                timestamp,
+                quality
+              }));
+            });
+            console.log(`Screen frame sent to ${session.approvedClients.size} clients in session ${sessionId}`);
+          }
+        }
+        break;
+      case 'offer':
+      case 'answer':
+      case 'candidate':
+        {
+          const { sessionId, targetId, signal } = data;
+          const session = sessions.get(sessionId);
+          if (session) {
+            if (session.hostWs === ws && session.approvedClients.has(targetId)) {
+              // Host sending signal to specific approved client
+              session.approvedClients.get(targetId).send(JSON.stringify({ type: data.type, senderId: 'host', signal }));
+            } else if (ws.clientId && session.approvedClients.has(ws.clientId) && session.hostWs) {
+              // Client sending signal to host
+              session.hostWs.send(JSON.stringify({ type: data.type, senderId: ws.clientId, signal }));
+            }
+          }
+        }
+        break;
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('WebSocket client disconnected');
+    sessions.forEach((session, sessionId) => {
+      if (session.hostWs === ws) {
+        console.log(`Host for session ${sessionId} disconnected. Closing session.`);
+        session.pendingClients.forEach(clientWs => clientWs.send(JSON.stringify({ type: 'host-disconnected' })));
+        session.approvedClients.forEach(clientWs => clientWs.send(JSON.stringify({ type: 'host-disconnected' })));
+        sessions.delete(sessionId);
+      } else {
+        // Check if it's a pending client
+        session.pendingClients.forEach((clientWs, clientId) => {
+          if (clientWs === ws) {
+            console.log(`Pending client ${clientId} disconnected from session ${sessionId}`);
+            session.pendingClients.delete(clientId);
+            session.hostWs.send(JSON.stringify({ type: 'client-disconnected', clientId }));
+          }
+        });
+        // Check if it's an approved client
+        session.approvedClients.forEach((clientWs, clientId) => {
+          if (clientWs === ws) {
+            console.log(`Approved client ${clientId} disconnected from session ${sessionId}`);
+            session.approvedClients.delete(clientId);
+            session.hostWs.send(JSON.stringify({ type: 'peer-disconnected', clientId }));
+          }
+        });
+      }
+    });
+  });
+
+  ws.on('error', error => {
+    console.error('WebSocket error:', error);
+  });
+});
+
+console.log('WebSocket server started on port 8080');
