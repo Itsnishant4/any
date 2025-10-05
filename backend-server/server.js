@@ -60,24 +60,6 @@ wss.on('connection', ws => {
           }
         }
         break;
-      case 'screen-frame':
-        {
-          const { sessionId, data: frameData, timestamp, quality } = data;
-          const session = sessions.get(sessionId);
-          if (session && session.hostWs === ws) {
-            // Host sending screen frame to all approved clients
-            session.approvedClients.forEach((clientWs, clientId) => {
-              clientWs.send(JSON.stringify({
-                type: 'screen-frame',
-                data: frameData,
-                timestamp,
-                quality
-              }));
-            });
-            console.log(`Screen frame sent to ${session.approvedClients.size} clients in session ${sessionId}`);
-          }
-        }
-        break;
       case 'offer':
       case 'answer':
       case 'candidate':
@@ -85,6 +67,7 @@ wss.on('connection', ws => {
           const { sessionId, targetId, signal } = data;
           const session = sessions.get(sessionId);
           if (session) {
+            const senderId = ws.clientId || 'host';
             if (session.hostWs === ws && session.approvedClients.has(targetId)) {
               // Host sending signal to specific approved client
               session.approvedClients.get(targetId).send(JSON.stringify({ type: data.type, senderId: 'host', signal }));
@@ -112,7 +95,9 @@ wss.on('connection', ws => {
           if (clientWs === ws) {
             console.log(`Pending client ${clientId} disconnected from session ${sessionId}`);
             session.pendingClients.delete(clientId);
-            session.hostWs.send(JSON.stringify({ type: 'client-disconnected', clientId }));
+            if(session.hostWs && session.hostWs.readyState === WebSocket.OPEN) {
+                session.hostWs.send(JSON.stringify({ type: 'client-disconnected', clientId }));
+            }
           }
         });
         // Check if it's an approved client
@@ -120,7 +105,9 @@ wss.on('connection', ws => {
           if (clientWs === ws) {
             console.log(`Approved client ${clientId} disconnected from session ${sessionId}`);
             session.approvedClients.delete(clientId);
-            session.hostWs.send(JSON.stringify({ type: 'peer-disconnected', clientId }));
+            if(session.hostWs && session.hostWs.readyState === WebSocket.OPEN) {
+                session.hostWs.send(JSON.stringify({ type: 'peer-disconnected', clientId }));
+            }
           }
         });
       }
