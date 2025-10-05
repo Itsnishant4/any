@@ -98,6 +98,33 @@ function getNutKey(key) {
 }
 
 
+// --- nut.js Key Mapping Helper ---
+// This maps web event.key values to nut.js Key enum values
+function getNutKey(key) {
+    const keyMap = {
+        "Enter": Key.Enter, "Backspace": Key.Backspace, "Tab": Key.Tab,
+        "Escape": Key.Escape, "ArrowUp": Key.Up, "ArrowDown": Key.Down,
+        "ArrowLeft": Key.Left, "ArrowRight": Key.Right, "Home": Key.Home,
+        "End": Key.End, "PageUp": Key.PageUp, "PageDown": Key.PageDown,
+        "Insert": Key.Insert, "Delete": Key.Delete, "F1": Key.F1, "F2": Key.F2,
+        "F3": Key.F3, "F4": Key.F4, "F5": Key.F5, "F6": Key.F6, "F7": Key.F7,
+        "F8": Key.F8, "F9": Key.F9, "F10": Key.F10, "F11": Key.F11, "F12": Key.F12,
+        "Control": Key.LeftControl, "Alt": Key.LeftAlt, "Shift": Key.LeftShift,
+        "Meta": Key.LeftSuper, // Command key on macOS, Windows key on Windows
+        " ": Key.Space,
+    };
+    if (keyMap[key]) {
+        return keyMap[key];
+    }
+    // For single characters, nut.js can typically take the character itself
+    if (key.length === 1) {
+        return key;
+    }
+    console.warn(`Unmapped key: '${key}'. Attempting to pass directly.`);
+    return key; // Fallback
+}
+
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -173,6 +200,141 @@ ipcMain.handle('getScreenSources', async () => {
 });
 
 // WebSocket functionality moved to React frontend
+
+// IPC: Handle remote input events using nut.js
+ipcMain.on('handle-input-event', async (event, inputEvent) => {
+    logger.info("🎯", "IPC handler called for input event");
+    logger.debug("🎯", `Event object: ${JSON.stringify(event)}`);
+    logger.debug("🎯", `Input event data: ${JSON.stringify(inputEvent)}`);
+
+    try {
+        logger.info("🔄", `Received remote input event: ${inputEvent.type}`);
+
+        // Check if nut-js is available
+        if (!mouse || !keyboard || !screen) {
+            logger.error("❌", "nut-js modules not available");
+            logger.error("❌", `Available modules: ${JSON.stringify({ mouse: !!mouse, keyboard: !!keyboard, screen: !!screen })}`);
+            return;
+        }
+
+        // Get screen size using Electron's screen module instead of nut-js
+        const electronScreen = require('electron').screen;
+        const primaryDisplay = electronScreen.getPrimaryDisplay();
+        const screenSize = primaryDisplay.workAreaSize;
+        logger.info("📺", `Screen size: ${screenSize.width}x${screenSize.height}`);
+
+        keyboard.config.autoDelayMs = 0; // For faster key presses
+
+        // Validate coordinates
+        if (inputEvent.x < 0 || inputEvent.x > 1 || inputEvent.y < 0 || inputEvent.y > 1) {
+            logger.warn('⚠️', `Received out-of-bounds mouse coordinates: ${inputEvent.x}, ${inputEvent.y}`);
+            return;
+        }
+
+        const scaledX = Math.round(inputEvent.x * screenSize.width);
+        const scaledY = Math.round(inputEvent.y * screenSize.height);
+        logger.info("🖱️", `Scaled coordinates: (${scaledX}, ${scaledY})`);
+
+        switch(inputEvent.type) {
+            case 'mousemove':
+                logger.info("🖱️", `Moving mouse to: (${scaledX}, ${scaledY})`);
+                try {
+                    // Try direct positioning first
+                    await mouse.setPosition(new Point(scaledX, scaledY));
+                    logger.info("✅", "Mouse moved successfully with setPosition");
+                } catch (moveError) {
+                    logger.error("❌", `setPosition failed: ${moveError.message}`);
+                    try {
+                        // Fallback to move method
+                        await mouse.move([new Point(scaledX, scaledY)]);
+                        logger.info("✅", "Mouse moved successfully with move method");
+                    } catch (moveError2) {
+                        logger.error("❌", `move method also failed: ${moveError2.message}`);
+                        // Final fallback: try relative movement
+                        try {
+                            const currentPos = await mouse.getPosition();
+                            const deltaX = scaledX - currentPos.x;
+                            const deltaY = scaledY - currentPos.y;
+                            await mouse.move([new Point(deltaX, deltaY)]);
+                            logger.info("✅", "Mouse moved relatively successfully");
+                        } catch (relativeError) {
+                            logger.error("❌", `All mouse movement methods failed: ${relativeError.message}`);
+                        }
+                    }
+                }
+                break;
+            case 'mousedown':
+                const buttonDown = inputEvent.button === 'left' ? Button.LEFT : inputEvent.button === 'middle' ? Button.MIDDLE : Button.RIGHT;
+                logger.info("🖱️", `Pressing button: ${inputEvent.button}`);
+                try {
+                    await mouse.pressButton(buttonDown);
+                    logger.info("✅", "Button pressed successfully");
+                } catch (btnError) {
+                    logger.error("❌", `Button press failed: ${btnError.message}`);
+                }
+                break;
+            case 'mouseup':
+                const buttonUp = inputEvent.button === 'left' ? Button.LEFT : inputEvent.button === 'middle' ? Button.MIDDLE : Button.RIGHT;
+                logger.info("🖱️", `Releasing button: ${inputEvent.button}`);
+                try {
+                    await mouse.releaseButton(buttonUp);
+                    logger.info("✅", "Button released successfully");
+                } catch (btnError) {
+                    logger.error("❌", `Button release failed: ${btnError.message}`);
+                }
+                break;
+            case 'keydown':
+                const keyToPress = getNutKey(inputEvent.key);
+                logger.info("⌨️", `Pressing key: ${inputEvent.key} -> ${keyToPress}`);
+                if (keyToPress) {
+                    try {
+                        await keyboard.pressKey(keyToPress);
+                        logger.info("✅", "Key pressed successfully");
+                    } catch (keyError) {
+                        logger.error("❌", `Key press failed: ${keyError.message}`);
+                    }
+                } else {
+                    logger.warn("⚠️", `Could not map key: ${inputEvent.key}`);
+                }
+                break;
+            case 'keyup':
+                const keyToRelease = getNutKey(inputEvent.key);
+                logger.info("⌨️", `Releasing key: ${inputEvent.key} -> ${keyToRelease}`);
+                if (keyToRelease) {
+                    try {
+                        await keyboard.releaseKey(keyToRelease);
+                        logger.info("✅", "Key released successfully");
+                    } catch (keyError) {
+                        logger.error("❌", `Key release failed: ${keyError.message}`);
+                    }
+                } else {
+                    logger.warn("⚠️", `Could not map key: ${inputEvent.key}`);
+                }
+                break;
+            case 'scroll':
+                logger.info("🖱️", `Scrolling: ${inputEvent.deltaY}`);
+                if (typeof inputEvent.deltaY === 'number') {
+                    try {
+                        if (inputEvent.deltaY > 0) {
+                            await mouse.scrollDown(5);
+                            logger.info("✅", "Scrolled down successfully");
+                        } else {
+                            await mouse.scrollUp(5);
+                            logger.info("✅", "Scrolled up successfully");
+                        }
+                    } catch (scrollError) {
+                        logger.error("❌", `Scroll failed: ${scrollError.message}`);
+                    }
+                }
+                break;
+            default:
+                logger.warn("⚠️", `Unknown input event type: ${inputEvent.type}`);
+        }
+    } catch (e) {
+        logger.error("❌", `Error executing remote input via nut.js: ${e.message}`);
+        logger.error("❌", `Stack trace: ${e.stack}`);
+    }
+});
 
 // IPC: Handle remote input events using nut.js
 ipcMain.on('handle-input-event', async (event, inputEvent) => {

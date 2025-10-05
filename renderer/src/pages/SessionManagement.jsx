@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useRemoteControl } from '../hooks/useRemoteControl';
 import { useWebSocket } from '../hooks/useWebSocket.jsx';
+
 import SessionControls from '../components/session/SessionControls';
 import HostView from '../components/session/HostView';
 import ClientView from '../components/session/ClientView';
@@ -19,69 +20,13 @@ function SessionManagement() {
   const [isControlling, setIsControlling] = useState(false);
   const [sessionCode, setSessionCode] = useState('');
 
-  // Refs
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-
-  // WebSocket connection for signaling server (now provided by WebSocketProvider)
-  const {
-    sendMessage: sendWsMessage,
-    subscribe,
-  } = useWebSocket();
-
-  // Use custom hooks for WebRTC and remote control functionality
-  const {
-    peers,
-    pendingClients,
-    remoteStream,
-    isSessionReady,
-    sessionCode: webrtcSessionCode,
-    createOffer,
-    removePeer,
-    resetConnections,
-    handleSignalingMessage,
-    peerConnectionsRef,
-    dataChannelsRef
-  } = useWebRTC(isHost, '', joinCode, sendWsMessage);
-
-
-  const {
-    clientCursors,
-    peersWithControl,
-    handleToggleControl
-  } = useRemoteControl(isHost, remoteVideoRef, dataChannelsRef, isControlling);
-
-  // Set up WebSocket message forwarding to WebRTC hook
-  useEffect(() => {
-    const unsubscribe = subscribe((message) => {
-      console.log('📨 [DEBUG] SessionManagement received WebSocket message:', message);
-      handleSignalingMessage(message);
-    });
-
-    return unsubscribe;
-  }, [subscribe, handleSignalingMessage]);
-
-  // Debug logging for control flow
-  useEffect(() => {
-    console.log("🔄 Session State Update:", {
-      isHost,
-      isControlling,
-      sessionCode,
-      joinCodei,
-      peersCount: peers.length,
-      peersWithControlCount: peersWithControl.size,
-      clientCursorsCount: Object.keys(clientCursors).length
-    });
-  }, [isHost, isControlling, sessionCode, joinCodei, peers, peersWithControl, clientCursors]);
-
-  // Test IPC communication on mount
-  
 
   // Session actions
   const createSession = () => {
     setIsHost(true);
     setJoinCode('');
     sendWsMessage({ type: 'create-session' });
+
   };
 
   const joinSession = () => {
