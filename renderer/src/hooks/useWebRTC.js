@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
  * Custom hook for WebRTC peer connection management
  * Handles all WebRTC-related logic including connection setup, signaling, and cleanup
  */
-export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sendMessage = null) {
+export function useWebRTC(isHost = false, joinCode = null, sendMessage = null) {
+  //=======================DECLARATIONS================
   const [peers, setPeers] = useState([]);
   const [pendingClients, setPendingClients] = useState([]);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -12,20 +13,30 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
   const [currentSessionCode, setCurrentSessionCode] = useState('');
   const [signalingQueue, setSignalingQueue] = useState([]);
   const [pendingIceCandidates, setPendingIceCandidates] = useState({});
-
+  const [connectingPeers, setConnectingPeers] = useState(new Set());
+  const [isConnecting, setIsConnecting] = useState(false);
   const peerConnectionsRef = useRef({});
   const dataChannelsRef = useRef({});
+  //============================================
 
-  // WebRTC Configuration
+  //=======================WEBRTC CONFIGURATION================
   const configuration = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:stun.stunprotocol.org:3478' },
+      { urls: 'stun:stun.nextcloud.com:443' }
+    ]
   };
+  //============================================
 
-  // Process queued signaling messages once session is ready
+  //=======================SIGNALING QUEUE PROCESSOR================
   const processSignalingQueue = useCallback(async () => {
     if (!isSessionReady || signalingQueue.length === 0) return;
 
-    console.log('🔄 [DEBUG] Processing signaling queue:', signalingQueue.length, 'messages');
     const messages = [...signalingQueue];
     setSignalingQueue([]);
 
@@ -33,96 +44,102 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
       await handleSignalingMessage(message);
     }
   }, [isSessionReady, signalingQueue]);
+  //============================================
 
-  // Main signaling message handler
-  const handleSignalingMessage = useCallback(async (message) => {
-    console.log('📨 [DEBUG] Handling signaling message:', message);
-
-    // Handle both raw message strings and parsed objects
-    let data;
+  //=======================MESSAGE PARSER================
+  const parseMessage = useCallback((message) => {
     if (typeof message === 'string') {
-      data = JSON.parse(message);
+      return JSON.parse(message);
     } else if (message.data) {
-      // Handle WebSocket event format
-      data = JSON.parse(message.data);
-    } else {
-      // Assume it's already a parsed object
-      data = message;
+      return JSON.parse(message.data);
     }
+    return message;
+  }, []);
+  //============================================
 
-    console.log('📊 [DEBUG] Parsed message data:', data);
-    const pc = isHost ? peerConnectionsRef.current[data.senderId] : peerConnectionsRef.current['host'];
-
-    switch (data.type) {
-      case 'session-created':
-        console.log('✅ [DEBUG] Session created:', data.sessionId);
-        console.log('🔄 [DEBUG] Setting currentSessionCode to:', data.sessionId);
-        setCurrentSessionCode(data.sessionId);
-        setIsSessionReady(true);
-        console.log('✅ [DEBUG] Session ready state set to true');
-        break;
-
-      case 'session-joined':
-        console.log(`🔗 [DEBUG] Joined session ${data.sessionId} as client ${data.clientId}`);
-        await createPeerConnection(data.sessionId, 'host');
-        setIsSessionReady(true);
-        break;
-
-      case 'client-request-join':
-        console.log('👥 [DEBUG] Client request to join:', data.clientId);
-        setPendingClients(prev => [...prev, { id: data.clientId, sessionId: data.sessionId }]);
-        break;
-
-      case 'peer-approved':
-        console.log('✅ [DEBUG] Peer approved:', data.clientId);
-        setPeers(prev => [...prev, { id: data.clientId, name: `Peer ${data.clientId}`, status: 'Connecting' }]);
-        setPendingClients(prev => prev.filter(client => client.id !== data.clientId));
-        break;
-
-      case 'session-rejected':
-        alert('Your request to join the session was rejected by the host.');
-        resetConnections();
-        break;
-
-      case 'offer':
-        if (pc) {
-          await handleOffer(pc, data);
-        }
-        break;
-
-      case 'answer':
-        if (pc) {
-          await handleAnswer(pc, data);
-        }
-        break;
-
-      case 'candidate':
-        await handleIceCandidate(pc, data, isHost);
-        break;
-
-      case 'host-disconnected':
-        alert('Host disconnected. Session ended.');
-        resetConnections();
-        break;
-
-      case 'peer-disconnected':
-        removePeer(data.clientId);
-        break;
-
-      case 'client-disconnected':
-        setPendingClients(prev => prev.filter(client => client.id !== data.clientId));
-        break;
-
-      case 'session-not-found':
-        alert('Session not found. Please check the code.');
-        break;
-    }
-  }, [isHost, joinCode, pendingIceCandidates, isSessionReady]);
-
-  // Handle WebRTC offer
-  const handleOffer = async (pc, data) => {
+  //=======================SIGNALING MESSAGE HANDLER================
+  const handleSignalingMessage = useCallback(async (message) => {
     try {
-      console.log('🔄 [DEBUG] Setting remote description (offer)');
+      const data = parseMessage(message);
+      const pc = isHost ? peerConnectionsRef.current[data.senderId] : peerConnectionsRef.current['host'];
+
+      switch (data.type) {
+        case 'session-created':
+          setCurrentSessionCode(data.sessionId);
+          setIsSessionReady(true);
+          break;
+
+        case 'session-joined':
+          await createPeerConnection(data.sessionId, 'host');
+          setIsSessionReady(true); // Move this line to AFTER the peer connection is created.
+          break;
+
+        case 'client-request-join':
+          setPendingClients(prev => [...prev, { id: data.clientId, sessionId: data.sessionId }]);
+          break;
+
+        case 'peer-approved':
+          setPeers(prev => [...prev, { id: data.clientId, name: `Peer ${data.clientId}`, status: 'Connecting' }]);
+          setPendingClients(prev => prev.filter(client => client.id !== data.clientId));
+          break;
+
+        case 'session-rejected':
+          alert('Your request to join the session was rejected by the host.');
+          resetConnections();
+          break;
+
+        case 'offer':
+          if (pc) {
+            await handleOffer(pc, data);
+          }
+          break;
+
+        case 'answer':
+          if (pc) {
+            await handleAnswer(pc, data);
+          }
+          break;
+
+        case 'candidate':
+          await handleIceCandidate(pc, data, isHost);
+          break;
+
+        case 'host-disconnected':
+          alert('Host disconnected. Session ended.');
+          resetConnections();
+          break;
+
+        case 'peer-disconnected':
+          removePeer(data.clientId);
+          break;
+
+        case 'client-disconnected':
+          setPendingClients(prev => prev.filter(client => client.id !== data.clientId));
+          break;
+
+        case 'session-not-found':
+          alert('Session not found. Please check the code.');
+          break;
+
+        case 'client-connected':
+          console.log('✅ [DEBUG] Client connection confirmed');
+          // Update peer status to connected when client confirms connection
+          if (isHost && data.senderId) {
+            setPeers(prev => prev.map(p =>
+              p.id === data.senderId ? {...p, status: 'Connected'} : p
+            ));
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('❌ [DEBUG] Error handling signaling message:', error);
+    }
+  }, [isHost, joinCode, parseMessage]);
+  //============================================
+
+  //=======================WEBRTC OFFER HANDLER================
+  const handleOffer = useCallback(async (pc, data) => {
+    try {
       await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
 
       // Process pending ICE candidates
@@ -135,11 +152,9 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
         setPendingIceCandidates(prev => ({...prev, host: []}));
       }
 
-      console.log('✅ [DEBUG] Remote description set, creating answer');
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      console.log('📤 [DEBUG] Sending answer to host');
       if (sendMessage) {
         sendMessage({
           type: 'answer',
@@ -147,50 +162,49 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
           targetId: data.senderId,
           signal: pc.localDescription
         });
-      } else {
-        console.warn('⚠️ [DEBUG] No sendMessage function provided');
       }
     } catch (error) {
-      console.error('❌ [DEBUG] Error handling offer:', error);
+      console.error('❌ [DEBUG] Error handling WebRTC offer:', error);
     }
-  };
+  }, [sendMessage, joinCode, pendingIceCandidates]);
+  //============================================
 
-  // Handle WebRTC answer
-  const handleAnswer = async (pc, data) => {
+  //=======================WEBRTC ANSWER HANDLER================
+  const handleAnswer = useCallback(async (pc, data) => {
     try {
-      console.log('🔄 [DEBUG] Setting remote description (answer)');
       await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-      console.log('✅ [DEBUG] Answer remote description set for client:', data.senderId);
+      console.log('✅ [DEBUG] Answer remote description set');
     } catch (error) {
       console.error('❌ [DEBUG] Error setting answer:', error);
     }
-  };
+  }, []);
+  //============================================
 
-  // Handle ICE candidates
-  const handleIceCandidate = async (pc, data, isHost) => {
-    console.log('🧊 [DEBUG] Received ICE candidate from:', data.senderId);
-    const targetId = isHost ? data.senderId : 'host';
+  //=======================ICE CANDIDATE HANDLER================
+  const handleIceCandidate = useCallback(async (pc, data, isHost) => {
+    try {
+      console.log('🧊 [DEBUG] Received ICE candidate from:', data.senderId);
+      const targetId = isHost ? data.senderId : 'host';
 
-    if (pc && pc.remoteDescription) {
-      try {
+      if (pc && pc.remoteDescription) {
         await pc.addIceCandidate(new RTCIceCandidate(data.signal));
         console.log('✅ [DEBUG] ICE candidate added for:', targetId);
-      } catch (error) {
-        console.error('❌ [DEBUG] Error adding ICE candidate:', error);
+      } else {
+        console.log('⏳ [DEBUG] Queuing ICE candidate, remote description not set for:', targetId);
+        setPendingIceCandidates(prev => ({
+          ...prev,
+          [targetId]: [...(prev[targetId] || []), new RTCIceCandidate(data.signal)]
+        }));
       }
-    } else {
-      console.log('⏳ [DEBUG] Queuing ICE candidate, remote description not set for:', targetId);
-      setPendingIceCandidates(prev => ({
-        ...prev,
-        [targetId]: [...(prev[targetId] || []), new RTCIceCandidate(data.signal)]
-      }));
+    } catch (error) {
+      console.error('❌ [DEBUG] Error handling ICE candidate:', error);
     }
-  };
+  }, []);
+  //============================================
 
-  // Create peer connection
+  //=======================PEER CONNECTION CREATOR================
   const createPeerConnection = async (sessionId, targetId) => {
-    console.log(`🔗 [DEBUG] Creating peer connection for target: ${targetId}`);
-
+     
     // Close existing connection if any
     if (peerConnectionsRef.current[targetId]) {
       peerConnectionsRef.current[targetId].close();
@@ -213,8 +227,8 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
     // Set up event handlers
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log(`🧊 [DEBUG] Local ICE candidate generated for ${targetId}`);
         if (sendMessage) {
+          console.log(`🧊 [DEBUG] Sending ICE candidate to ${targetId}`);
           sendMessage({
             type: 'candidate',
             sessionId,
@@ -222,59 +236,125 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
             signal: event.candidate
           });
         } else {
-          console.warn('⚠️ [DEBUG] No sendMessage function provided for ICE candidate');
+          console.warn('⚠️ [DEBUG] No sendMessage function provided for ICE candidate - this is normal for client during initial connection');
         }
       }
     };
 
     pc.ontrack = (event) => {
-      console.log('🎥 [DEBUG] Remote stream received');
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(event.streams[0]);
+      console.log('🎥 [DEBUG] Remote track received:', event.track.kind);
+      if (remoteStream) {
+        // If stream already exists, add the track to it
+        remoteStream.addTrack(event.track);
+      } else {
+        // If stream doesn't exist, create a new one with the incoming tracks
+        const newStream = new MediaStream();
+        newStream.addTrack(event.track);
+        setRemoteStream(newStream);
       }
     };
 
     pc.onconnectionstatechange = () => {
       console.log(`🔄 [DEBUG] Connection state for ${targetId} changed:`, pc.connectionState);
-      if (pc.connectionState === 'connected' && isHost) {
-        setPeers(prev => prev.map(p =>
-          p.id === targetId ? {...p, status: 'Connected'} : p
-        ));
-      }
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+
+      // Update connecting state
+      if (pc.connectionState === 'connecting') {
+        setConnectingPeers(prev => new Set([...prev, targetId]));
+        setIsConnecting(true);
+      } else if (pc.connectionState === 'connected') {
+        console.log(`✅ [DEBUG] 🎉 PEER CONNECTION ESTABLISHED for ${targetId}!`);
+        setConnectingPeers(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(targetId);
+          // Update overall connecting state
+          if (newSet.size === 0) {
+            setIsConnecting(false);
+          }
+          return newSet;
+        });
+
+        // Update peer status for both host and client
+        if (isHost) {
+          setPeers(prev => prev.map(p =>
+            p.id === targetId ? {...p, status: 'Connected'} : p
+          ));
+        } else {
+          // Notify host that client connection is established
+          if (sendMessage && pc.localDescription && pc.remoteDescription) {
+            console.log('✅ [DEBUG] Client connection established, notifying host');
+            sendMessage({
+              type: 'client-connected',
+              sessionId: joinCode,
+              targetId: 'host',
+              status: 'connected'
+            });
+          }
+        }
+      } else if (pc.connectionState === 'failed') {
+        console.error(`❌ [DEBUG] Connection failed for ${targetId}`);
+        setConnectingPeers(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(targetId);
+          return newSet;
+        });
+        if (isHost) {
+          removePeer(targetId);
+        } else {
+          resetConnections();
+          alert("Connection to host failed. Please try again.");
+        }
+        // Update overall connecting state
+        setConnectingPeers(prev => {
+          const newSet = new Set(prev);
+          if (newSet.size === 0) {
+            setIsConnecting(false);
+          }
+          return newSet;
+        });
+      } else if (pc.connectionState === 'disconnected') {
+        console.warn(`⚠️ [DEBUG] Connection disconnected for ${targetId}`);
+        setConnectingPeers(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(targetId);
+          return newSet;
+        });
         if (isHost) {
           removePeer(targetId);
         } else {
           resetConnections();
           alert("Connection to host lost.");
         }
+        // Update overall connecting state
+        setConnectingPeers(prev => {
+          const newSet = new Set(prev);
+          if (newSet.size === 0) {
+            setIsConnecting(false);
+          }
+          return newSet;
+        });
       }
     };
 
     peerConnectionsRef.current[targetId] = pc;
     return pc;
   };
+  //============================================
 
-  // Set up data channel for remote control
+  //=======================DATA CHANNEL SETUP================
   const setupDataChannel = (channel, targetId) => {
-    channel.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === 'cursor-position') {
-          // Handle cursor position updates (for host to show client cursors)
-          console.log('Cursor position:', message);
-        } else {
-          // Handle remote input events
-          console.log("Sending input event to main process:", message);
-          window.api.sendInputEvent(message);
-        }
-      } catch (e) {
-        console.error("Failed to parse data channel message:", e);
-      }
+    // REMOVE THE ENTIRE onmessage IMPLEMENTATION FROM HERE
+    // The useRemoteControl hook will handle this exclusively.
+    channel.onopen = () => {
+      console.log(`✅ Data channel for ${targetId} is open.`);
     };
+    channel.onclose = () => {
+      console.log(`🔌 Data channel for ${targetId} is closed.`);
+    };
+    // channel.onmessage is now set in useRemoteControl.js
   };
+  //============================================
 
-  // Remove a peer connection
+  //=======================PEER REMOVAL================
   const removePeer = (clientId) => {
     console.log(`🚫 [DEBUG] Removing peer: ${clientId}`);
     setPeers(prev => prev.filter(peer => peer.id !== clientId));
@@ -288,8 +368,9 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
       delete dataChannelsRef.current[clientId];
     }
   };
+  //============================================
 
-  // Reset all connections
+  //=======================CONNECTION RESET================
   const resetConnections = () => {
     Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
     peerConnectionsRef.current = {};
@@ -303,42 +384,44 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
     setSignalingQueue([]);
     setPendingIceCandidates({});
   };
+  //============================================
 
-  // Create offer for new peer (host only)
-  const createOffer = async (sessionId, clientId, mediaStream) => {
+  //=======================OFFER CREATOR================
+  const createOffer = useCallback(async (sessionId, clientId, mediaStream) => {
     if (!mediaStream) {
       throw new Error("No media stream available");
     }
 
-    const pc = await createPeerConnection(sessionId, clientId);
+    try {
+      const pc = await createPeerConnection(sessionId, clientId);
 
-    // Add media tracks
-    mediaStream.getTracks().forEach(track => pc.addTrack(track, mediaStream));
+      // Add media tracks
+      mediaStream.getTracks().forEach(track => pc.addTrack(track, mediaStream));
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-    console.log(`📤 [DEBUG] Sending offer to client: ${clientId}`);
-    if (sendMessage) {
-      sendMessage({
-        type: 'offer',
-        sessionId,
-        targetId: clientId,
-        signal: pc.localDescription
-      });
-    } else {
-      console.warn('⚠️ [DEBUG] No sendMessage function provided for offer');
+      console.log(`📤 [DEBUG] Sending offer to client: ${clientId}`);
+      if (sendMessage) {
+        sendMessage({
+          type: 'offer',
+          sessionId,
+          targetId: clientId,
+          signal: pc.localDescription
+        });
+      }
+
+      return pc;
+    } catch (error) {
+      console.error('❌ [DEBUG] Error creating offer:', error);
+      throw error;
     }
+  }, [sendMessage]);
+  //============================================
 
-    return pc;
-  };
-
-  // Set up WebSocket message listener
+  //=======================WEBSOCKET MESSAGE LISTENER================
   useEffect(() => {
-    const wsListener = (message) => {
-      console.log('📨 [DEBUG] WebRTC received WebSocket message:', message);
-
-      // Message is already parsed from WebSocket context
+    const handleWebSocketMessage = (message) => {
       // Queue messages if session isn't ready
       if (!isSessionReady && !['session-created', 'session-joined'].includes(message.type)) {
         console.log('⏳ [DEBUG] Queuing signaling message until session is ready:', message.type);
@@ -349,23 +432,37 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
       handleSignalingMessage(message);
     };
 
-    console.log('🔗 [DEBUG] Setting up WebSocket message listener for WebRTC');
+    // WebSocket message handling is done through the WebSocket context
+    // This effect is for any additional setup if needed
 
     return () => {
-      // WebSocket context handles its own cleanup
+      // Cleanup if needed
     };
   }, [handleSignalingMessage, isSessionReady]);
+  //============================================
 
-  // Debug logging for session code changes
+  //=======================SIGNALING QUEUE EFFECT================
   useEffect(() => {
-    console.log('🔄 [DEBUG] WebRTC Session Code Updated:', currentSessionCode);
-  }, [currentSessionCode]);
-
-  // Process signaling queue when session becomes ready
-  useEffect(() => {
-    processSignalingQueue();
+    if (isSessionReady && signalingQueue.length > 0) {
+      processSignalingQueue();
+    }
   }, [signalingQueue, isSessionReady, processSignalingQueue]);
 
+  //=======================CONNECTION TIMEOUT================
+  useEffect(() => {
+    if (!isHost && isConnecting && connectingPeers.length > 0) {
+      const timeout = setTimeout(() => {
+        console.warn('⚠️ [DEBUG] Connection timeout - resetting connections');
+        resetConnections();
+        alert('Connection timeout. Please try joining the session again.');
+      }, 30000); // 30 second timeout
+
+      return () => clearTimeout(timeout);
+    }
+  }, [isConnecting, connectingPeers.length, isHost]);
+  //============================================
+
+  //=======================RETURN OBJECT================
   return {
     // State
     peers,
@@ -373,6 +470,8 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
     remoteStream,
     isSessionReady,
     sessionCode: currentSessionCode,
+    isConnecting,
+    connectingPeers: Array.from(connectingPeers),
 
     // Actions
     createOffer,
@@ -384,4 +483,5 @@ export function useWebRTC(isHost = false, sessionId = null, joinCode = null, sen
     peerConnectionsRef,
     dataChannelsRef
   };
+  //============================================
 }

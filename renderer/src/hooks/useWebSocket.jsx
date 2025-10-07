@@ -14,18 +14,51 @@ const WebSocketContext = createContext(null);
 // WebSocket Provider Component
 export function WebSocketProvider({ children }) {
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [latency, setLatency] = useState(null);
   const [messages, setMessages] = useState([]);
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
   const messageHandlers = useRef(new Set());
+  const pingInterval = useRef(null);
+  const lastPongTime = useRef(null);
+
+  /**
+   * 📡 Start latency monitoring with ping/pong
+   */
+  const startLatencyMonitoring = useCallback(() => {
+    if (pingInterval.current) {
+      clearInterval(pingInterval.current);
+    }
+
+    pingInterval.current = setInterval(() => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        lastPongTime.current = Date.now();
+        wsRef.current.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 5000); // Ping every 5 seconds
+
+    // Listen for pong responses
+    const pongHandler = (message) => {
+      if (message.type === 'pong' && lastPongTime.current) {
+        const latencyMs = Date.now() - lastPongTime.current;
+        setLatency(latencyMs);
+      }
+    };
+
+    messageHandlers.current.add(pongHandler);
+
+    return () => {
+      messageHandlers.current.delete(pongHandler);
+    };
+  }, []);
 
   /**
    * 🔌 Connect to WebSocket server
    * @param {string} serverUrl - WebSocket server URL (default: deployed Render URL)
    */
-  const connect = useCallback((serverUrl = 'wss://any-fvzm.onrender.com') => {
+  const connect = useCallback((serverUrl = 'ws://localhost:8080') => {
     try {
-      console.log('🌐 Connecting to WebSocket:', serverUrl);
 
       // Cleanup existing connection if any
       if (wsRef.current) {
@@ -33,18 +66,23 @@ export function WebSocketProvider({ children }) {
         wsRef.current.close();
       }
 
+      setIsConnecting(true);
       const ws = new WebSocket(serverUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         console.log('✅ WebSocket connected successfully');
         setIsConnected(true);
+        setIsConnecting(false);
 
         // Clear reconnection timer if running
         if (reconnectTimer.current) {
           clearTimeout(reconnectTimer.current);
           reconnectTimer.current = null;
         }
+
+        // Start latency monitoring
+        startLatencyMonitoring();
       };
 
       ws.onmessage = (event) => {
@@ -91,7 +129,7 @@ export function WebSocketProvider({ children }) {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const messageStr = typeof message === 'string' ? message : JSON.stringify(message);
       wsRef.current.send(messageStr);
-      console.log('📤 Sent WebSocket message:', message);
+      console.log('send msg from websocet.jsx 132 line number ');
       return true;
     } else {
       console.warn('⚠️ WebSocket not connected. Message not sent:', message);
@@ -121,9 +159,15 @@ export function WebSocketProvider({ children }) {
       wsRef.current = null;
     }
     setIsConnected(false);
+    setIsConnecting(false);
+    setLatency(null);
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current);
       reconnectTimer.current = null;
+    }
+    if (pingInterval.current) {
+      clearInterval(pingInterval.current);
+      pingInterval.current = null;
     }
   }, []);
 
@@ -138,12 +182,13 @@ export function WebSocketProvider({ children }) {
 
   // Initialize connection on mount
   useEffect(() => {
-    console.log("🌐 Initializing universal WebSocket connection...");
     connect('wss://any-fvzm.onrender.com');
   }, [connect]);
 
   const value = {
     isConnected,
+    isConnecting,
+    latency,
     messages,
     sendMessage,
     subscribe,
@@ -179,6 +224,8 @@ export function useWebSocket(onMessage = null) {
 
   return {
     isConnected: context.isConnected,
+    isConnecting: context.isConnecting,
+    latency: context.latency,
     messages: context.messages,
     sendMessage: context.sendMessage,
     subscribe: context.subscribe,

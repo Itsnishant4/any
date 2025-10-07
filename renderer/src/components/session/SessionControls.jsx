@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 /**
  * SessionControls component handles the initial session creation and joining UI

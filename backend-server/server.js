@@ -64,17 +64,37 @@ wss.on('connection', ws => {
       case 'answer':
       case 'candidate':
         {
+          // --- ADD LOGGING HERE ---
+          console.log(`[SIGNALING] Received signal: ${data.type} for target: ${data.targetId}`);
+
           const { sessionId, targetId, signal } = data;
           const session = sessions.get(sessionId);
           if (session) {
             const senderId = ws.clientId || 'host';
             if (session.hostWs === ws && session.approvedClients.has(targetId)) {
-              // Host sending signal to specific approved client
+
+              // --- ADD LOGGING HERE ---
+              console.log(`[SIGNALING] Host is sending ${data.type} to client ${targetId}. Forwarding...`);
+
               session.approvedClients.get(targetId).send(JSON.stringify({ type: data.type, senderId: 'host', signal }));
+
             } else if (ws.clientId && session.approvedClients.has(ws.clientId) && session.hostWs) {
-              // Client sending signal to host
+
+              // --- ADD LOGGING HERE ---
+              console.log(`[SIGNALING] Client ${ws.clientId} is sending ${data.type} to host. Forwarding...`);
+
               session.hostWs.send(JSON.stringify({ type: data.type, senderId: ws.clientId, signal }));
+            } else {
+
+              // --- ADD LOGGING HERE ---
+              console.log(`[SIGNALING] FAILED to forward ${data.type}. Conditions not met.`);
+              console.log(`           - Is Host: ${session.hostWs === ws}`);
+              console.log(`           - Target in Approved List: ${session.approvedClients.has(targetId)}`);
+              console.log(`           - Approved clients:`, Array.from(session.approvedClients.keys()));
             }
+          } else {
+            // --- ADD LOGGING HERE ---
+            console.log(`[SIGNALING] FAILED to forward ${data.type}. Session ${sessionId} not found.`);
           }
         }
         break;

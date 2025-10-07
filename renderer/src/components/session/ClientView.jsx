@@ -1,5 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useWebSocket } from '../../hooks/useWebSocket';
+import FullScreenLoading from '../common/FullScreenLoading';
 
 /**
  * ClientView component handles the client's session interface
@@ -12,15 +14,22 @@ function ClientView({
   isControlling,
   onToggleControl,
   onResetSession,
-  remoteVideoRef
+  remoteVideoRef,
+  isConnecting: webrtcConnecting,
+  connectingPeers
 }) {
+  const { isConnected, isConnecting, latency } = useWebSocket();
+
   // Debug logging for client view
   console.log("🎯 ClientView Render:", {
     sessionCode,
     joinCode,
     hasRemoteStream: !!remoteStream,
     isControlling,
-    remoteVideoRef: !!remoteVideoRef.current
+    remoteVideoRef: !!remoteVideoRef.current,
+    isConnected,
+    isConnecting,
+    latency
   });
 
   return (
@@ -45,20 +54,73 @@ function ClientView({
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className={`w-full h-auto rounded-md mb-6 border-2 bg-black ${
+            muted
+            controls={false}
+            className={`w-full h-auto rounded-md mb-6 border-2 ${
               isControlling ? 'cursor-none border-blue-500' : 'border-gray-600'
             }`}
             style={{
               maxHeight: '500px',
-              objectFit: 'contain'
+              objectFit: 'contain',
+              backgroundColor: 'black'
+            }}
+            onLoadedMetadata={(e) => {
+              console.log('🎥 Video metadata loaded:', {
+                videoWidth: e.target.videoWidth,
+                videoHeight: e.target.videoHeight,
+                readyState: e.target.readyState
+              });
+
+              // Ensure all video tracks are enabled
+              if (remoteStream) {
+                remoteStream.getVideoTracks().forEach(track => {
+                  track.enabled = true;
+                  console.log('🎥 Video track enabled:', track.label, track.enabled, track.readyState);
+                });
+              }
+
+              // Force play with better error handling
+              e.target.play().then(() => {
+                console.log('✅ Video started playing successfully');
+              }).catch(err => {
+                console.error('❌ Error playing video:', err);
+                // Try again after a short delay
+                setTimeout(() => {
+                  e.target.play().catch(err2 => console.error('❌ Retry play failed:', err2));
+                }, 1000);
+              });
+            }}
+            onCanPlay={() => {
+              console.log('🎥 Video can play');
             }}
           />
+          {/* Debug info overlay */}
+          <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white text-xs p-2 rounded">
+            Stream: {remoteStream.id ? 'Active' : 'Inactive'} |
+            Tracks: {remoteStream.getTracks().length} |
+            Video: {remoteStream.getVideoTracks().length}
+          </div>
         </div>
       ) : (
         <div className="w-full h-96 bg-gray-700 rounded-md mb-6 border border-gray-600 flex items-center justify-center">
           <div className="text-center text-gray-400 text-lg animate-fade-in">
             <div className="loading loading-spinner loading-lg mx-auto mb-4"></div>
-            <p>Waiting for host to share screen...</p>
+            <p className="mb-2">
+              {webrtcConnecting ? 'Establishing connection with host...' :
+               isConnecting ? 'Connecting to server...' :
+               !isConnected ? 'Server connection lost. Reconnecting...' :
+               'Waiting for host to share screen...'}
+            </p>
+            {latency && isConnected && (
+              <p className="text-sm text-gray-500">
+                Latency: {latency}ms
+              </p>
+            )}
+            {!isConnected && (
+              <p className="text-sm text-yellow-400 mt-2">
+                Please check your internet connection
+              </p>
+            )}
           </div>
         </div>
       )}

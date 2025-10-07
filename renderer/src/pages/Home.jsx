@@ -1,9 +1,15 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import ConnectionStatus from '../components/common/ConnectionStatus';
 
 function Home() {
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white p-4">
+    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white p-4 relative">
+      {/* Connection Status - Top Right */}
+      <div className="absolute top-4 right-4">
+        <ConnectionStatus />
+      </div>
+
       <h1 className="text-5xl font-extrabold mb-8 animate-fade-in">Vibe Remote Desktop</h1>
       <p className="text-lg text-gray-300 mb-12 text-center max-w-md animate-fade-in animation-delay-200">
         Securely connect and manage your remote sessions with ease.

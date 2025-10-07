@@ -16,7 +16,6 @@ contextBridge.exposeInMainWorld('api', {
 
   // Expose a method to send input events to the main process
   sendInputEvent: (event) => {
-    console.log("📨 Preload sending input event:", event);
     ipcRenderer.send('handle-input-event', event);
   },
 

@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import ConnectionStatus from '../components/common/ConnectionStatus';
 
 function Settings() {
   const [allowRemoteInput, setAllowRemoteInput] = useState(true);
   const [autoApprove, setAutoApprove] = useState(false);
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-teal-900 to-cyan-800 text-white p-4">
+    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-teal-900 to-cyan-800 text-white p-4 relative">
+      {/* Connection Status - Top Right */}
+      <div className="absolute top-4 right-4">
+        <ConnectionStatus />
+      </div>
+
       <h1 className="text-4xl font-extrabold mb-8 animate-fade-in">Settings</h1>
 
       <div className="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-xl animate-scale-in">

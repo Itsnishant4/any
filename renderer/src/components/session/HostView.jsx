@@ -1,6 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import ScreenSourcePicker from '../ScreenSourcePicker';
+import { useWebSocket } from '../../hooks/useWebSocket';
+
 
 /**
  * HostView component handles the host's session interface
@@ -20,18 +22,14 @@ function HostView({
   onStopSharing,
   onResetSession,
   onSourceSelected,
-  localVideoRef
+  localVideoRef,
+  isConnecting: webrtcConnecting,
+  connectingPeers
 }) {
-  // Debug logging for host view
-  console.log("🏠 HostView Render:", {
-    sessionCode,
-    pendingClientsCount: pendingClients.length,
-    peersCount: peers.length,
-    hasMediaStream: !!mediaStream,
-    peersWithControlCount: peersWithControl.size,
-    clientCursorsCount: Object.keys(clientCursors).length,
-    peersWithControl: Array.from(peersWithControl)
-  });
+  const { isConnected, isConnecting, latency } = useWebSocket();
+
+  // All logging is disabled after approval, so this won't show
+  
 
   return (
     <>
@@ -40,9 +38,40 @@ function HostView({
         {sessionCode}
       </div>
 
+      {/* Connection Status Alert */}
+      {(!isConnected || isConnecting) && (
+        <div className={`mb-6 p-4 rounded-lg ${
+          isConnecting ? 'bg-yellow-900 bg-opacity-30 border border-yellow-600' :
+          'bg-red-900 bg-opacity-30 border border-red-600'
+        }`}>
+          <div className="flex items-center justify-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${
+              isConnecting ? 'bg-yellow-400 animate-pulse' : 'bg-red-400'
+            }`} />
+            <span className={`text-sm ${
+              isConnecting ? 'text-yellow-300' : 'text-red-300'
+            }`}>
+              {isConnecting ? 'Connecting to server...' : 'Connection lost - attempting to reconnect...'}
+            </span>
+            {latency && isConnected && (
+              <span className="text-green-400 text-sm">
+                • {latency}ms
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {pendingClients.length > 0 && (
         <div className="mb-8 p-6 bg-yellow-900 bg-opacity-30 rounded-lg shadow-inner animate-fade-in">
           <h3 className="text-xl font-bold mb-4 text-center text-yellow-300">Pending Join Requests</h3>
+          {!mediaStream && pendingClients.length > 0 && (
+            <div className="mb-4 p-3 bg-blue-900 bg-opacity-50 rounded-md border border-blue-600">
+              <p className="text-blue-200 text-sm text-center">
+                💡 <strong>Tip:</strong> Please select a screen to share (below) before approving clients
+              </p>
+            </div>
+          )}
           <ul className="space-y-3">
             {pendingClients.map(client => (
               <li key={client.id} className="flex items-center justify-between bg-gray-700 p-3 rounded-md shadow-sm">
@@ -52,7 +81,13 @@ function HostView({
                 <div className="flex space-x-2">
                   <button
                     onClick={() => onApproveClient(client.id, client.sessionId)}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-md text-white font-semibold text-sm transition-colors duration-300"
+                    disabled={!mediaStream}
+                    className={`px-4 py-2 rounded-md text-white font-semibold text-sm transition-colors duration-300 ${
+                      mediaStream
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : 'bg-gray-500 cursor-not-allowed'
+                    }`}
+                    title={!mediaStream ? 'Please select a screen to share before approving clients' : 'Approve client'}
                   >
                     Approve
                   </button>
