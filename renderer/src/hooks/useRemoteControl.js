@@ -136,7 +136,16 @@ export function useRemoteControl(isHost, remoteVideoRef, dataChannelsRef, isCont
   // Handle data channel messages for cursor positions and input events
   useEffect(() => {
     Object.entries(dataChannelsRef.current).forEach(([peerId, channel]) => {
-      if (channel && channel.readyState === 'open') {
+      // --- START FIX ---
+      // Attach listeners unconditionally. The browser will handle queuing
+      // messages until the channel is open.
+      if (channel) {
+        // Log when the channel opens
+        channel.onopen = () => {
+          console.log(`✅ Data channel for peer ${peerId} is open and ready for messages.`);
+        };
+        
+        // Attach the message handler
         channel.onmessage = (event) => {
           try {
             const message = JSON.parse(event.data);
@@ -163,9 +172,15 @@ export function useRemoteControl(isHost, remoteVideoRef, dataChannelsRef, isCont
             console.error("Failed to parse data channel message:", e);
           }
         };
+
+        // Optional: Log if the channel closes
+        channel.onclose = () => {
+          console.log(`🔌 Data channel for peer ${peerId} has closed.`);
+        };
       }
+      // --- END FIX ---
     });
-  }, [isHost, peersWithControl, dataChannelsRef]);
+  }, [isHost, peersWithControl, dataChannelsRef]); // Dependencies are correct
 
   return {
     // State

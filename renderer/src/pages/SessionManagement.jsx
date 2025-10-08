@@ -51,7 +51,7 @@ function SessionManagement() {
     handleSignalingMessage,
     peerConnectionsRef,
     dataChannelsRef
-  } = useWebRTC(isHost, '', joinCode, sendWsMessage);
+  } = useWebRTC(isHost, joinCode, sendWsMessage);
 
 
   const {

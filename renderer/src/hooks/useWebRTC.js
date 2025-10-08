@@ -280,7 +280,7 @@ export function useWebRTC(isHost = false, joinCode = null, sendMessage = null) {
           ));
         } else {
           // Notify host that client connection is established
-          if (sendMessage && pc.localDescription && pc.remoteDescription) {
+          if (sendMessage) {
             console.log('✅ [DEBUG] Client connection established, notifying host');
             sendMessage({
               type: 'client-connected',

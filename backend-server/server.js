@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
 
-const wss = new WebSocket.Server({ port: 8080 });
+// Increase the maxPayload size to handle large WebRTC offers
+const wss = new WebSocket.Server({ port: 8080, maxPayload: 1024 * 1024 }); // 1 MB limit
 
 const sessions = new Map(); // Map to store active sessions: sessionId -> { hostWs, pendingClients: Map<clientId, clientWs>, approvedClients: Map<clientId, clientWs> }
 
@@ -8,9 +9,12 @@ wss.on('connection', ws => {
   console.log('WebSocket client connected');
 
   ws.on('message', message => {
-    const data = JSON.parse(message);
+    // --- THIS IS THE CRITICAL FIX ---
+    // Wrap all message processing in a try...catch block to prevent crashes
+    try {
+      const data = JSON.parse(message);
 
-    switch (data.type) {
+      switch (data.type) {
       case 'create-session':
         {
           const sessionId = Math.random().toString(36).substring(2, 6).toUpperCase(); // 4-digit code
@@ -60,6 +64,22 @@ wss.on('connection', ws => {
           }
         }
         break;
+
+      case 'client-connected':
+        {
+          // This case handles the final confirmation from the client
+          // and forwards it to the host.
+          const session = sessions.get(data.sessionId);
+          if (session && ws.clientId && session.approvedClients.has(ws.clientId) && session.hostWs) {
+              console.log(`[SIGNALING] Client ${ws.clientId} confirmed connection. Notifying host.`);
+              session.hostWs.send(JSON.stringify({
+                  type: 'client-connected',
+                  senderId: ws.clientId,
+                  status: data.status
+              }));
+          }
+        }
+        break;
       case 'offer':
       case 'answer':
       case 'candidate':
@@ -98,6 +118,11 @@ wss.on('connection', ws => {
           }
         }
         break;
+      }
+    } catch (error) {
+        // If JSON.parse fails, this will catch the error and prevent a crash
+        console.error('[ERROR] Failed to parse message or process data:', error);
+        console.error('       Raw message:', message.toString()); // Log the raw message for debugging
     }
   });
 

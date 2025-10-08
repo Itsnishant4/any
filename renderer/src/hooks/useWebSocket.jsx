@@ -59,6 +59,7 @@ export function WebSocketProvider({ children }) {
    */
   const connect = useCallback((serverUrl = 'ws://localhost:8080') => {
     try {
+      console.log('🌐 Connecting to WebSocket:', serverUrl);
 
       // Cleanup existing connection if any
       if (wsRef.current) {
@@ -126,15 +127,36 @@ export function WebSocketProvider({ children }) {
   }, []);
 
   const sendMessage = useCallback((message) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const messageStr = typeof message === 'string' ? message : JSON.stringify(message);
+    // --- START: NEW ENHANCED VERSION ---
+    try {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        console.warn('⚠️ WebSocket not connected. Message not sent:', message);
+        return false;
+      }
+
+      console.log('📤 [sendMessage] Attempting to send message:', message);
+
+      let messageStr;
+      try {
+        messageStr = JSON.stringify(message);
+        console.log(`✅ [sendMessage] JSON.stringify successful. Payload size: ${messageStr.length} chars.`);
+      } catch (stringifyError) {
+        console.error('❌ [sendMessage] CRITICAL: Failed to JSON.stringify the message object.', stringifyError);
+        console.error('   [sendMessage] The problematic message object was:', message);
+        return false;
+      }
+
       wsRef.current.send(messageStr);
-      console.log('send msg from websocet.jsx 132 line number ');
+      console.log('✅ [sendMessage] ws.send() command executed.');
+
       return true;
-    } else {
-      console.warn('⚠️ WebSocket not connected. Message not sent:', message);
+
+    } catch (sendError) {
+      console.error('❌ [sendMessage] CRITICAL: An unexpected error occurred during the send process.', sendError);
+      console.error('   [sendMessage] The problematic message object was:', message);
       return false;
     }
+    // --- END: NEW ENHANCED VERSION ---
   }, []);
 
   /**
@@ -182,7 +204,8 @@ export function WebSocketProvider({ children }) {
 
   // Initialize connection on mount
   useEffect(() => {
-    connect('wss://any-fvzm.onrender.com');
+    console.log("🌐 Initializing universal WebSocket connection...");
+    connect('ws://localhost:8080');
   }, [connect]);
 
   const value = {
